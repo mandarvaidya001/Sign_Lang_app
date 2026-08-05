@@ -235,6 +235,9 @@ def camera_mode():
         print("Unable to open camera.")
         return
 
+    current_word = ""
+
+    current_letter = None
     while True:
 
         ret, frame = cap.read()
@@ -249,6 +252,7 @@ def camera_mode():
         if features is not None:
 
             letter, confidence = predict(features)
+            current_letter = letter
 
             cv2.putText(
                 frame,
@@ -291,13 +295,49 @@ def camera_mode():
                 (0,0,255),
                 2
             )
+        cv2.putText(
+            frame,
+            f"Word: {current_word}",
+            (20, 200),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (255, 255, 255),
+            2
+        )    
 
         cv2.imshow("HandTalk AI", frame)
 
-        key = cv2.waitKey(1)
+        key = cv2.waitKey(1) & 0xFF
 
-        if key == ord('q'):
+        # SPACE -> Add predicted letter
+        if key == 32:
+            if current_letter is not None:
+                current_word += str(current_letter)
+                print("Current Word:", current_word)
+
+        # BACKSPACE -> Delete last letter
+        elif key in (8, 127):
+            if len(current_word) > 0:
+                current_word = current_word[:-1]
+                print("Current Word:", current_word)
+
+        # C -> Clear entire word
+        elif key in (ord('c'), ord('C')):
+            current_word = ""
+            print("Word Cleared")
+
+        # ENTER -> Complete word
+        elif key in (10, 13):
+            if current_word:
+                print("Completed Word:", current_word)
+
+        # Q -> Quit
+        elif key in (ord('q'), ord('Q')):
             break
+
+        
+
+        
 
     cap.release()
 
