@@ -236,6 +236,7 @@ def camera_mode():
         return
 
     current_word = ""
+    cursor_pos = 0
 
     current_letter = None
     while True:
@@ -297,7 +298,7 @@ def camera_mode():
             )
         cv2.putText(
             frame,
-            f"Word: {current_word}",
+            f"Word: {current_word[:cursor_pos]}|{current_word[cursor_pos:]}",
             (20, 200),
             cv2.FONT_HERSHEY_SIMPLEX,
             1,
@@ -307,23 +308,36 @@ def camera_mode():
 
         cv2.imshow("HandTalk AI", frame)
 
-        key = cv2.waitKey(1) & 0xFF
+        key = cv2.waitKeyEx(1)
 
         # SPACE -> Add predicted letter
         if key == 32:
             if current_letter is not None:
-                current_word += str(current_letter)
-                print("Current Word:", current_word)
+             current_word = current_word[:cursor_pos] + str(current_letter) + current_word[cursor_pos:]
+             cursor_pos += 1
+             print("Current Word:", current_word)
 
-        # BACKSPACE -> Delete last letter
+        # LEFT ARROW -> Move cursor left
+        elif key == 2424832:
+           if cursor_pos > 0:
+              cursor_pos -= 1
+
+        # RIGHT ARROW -> Move cursor right
+        elif key == 2555904:
+            if cursor_pos < len(current_word):
+               cursor_pos += 1     
+
+        # BACKSPACE -> Delete letter before cursor
         elif key in (8, 127):
-            if len(current_word) > 0:
-                current_word = current_word[:-1]
-                print("Current Word:", current_word)
-
+          if cursor_pos > 0:
+             current_word = current_word[:cursor_pos - 1] + current_word[cursor_pos:]
+             cursor_pos -= 1
+             print("Current Word:", current_word)
+        
         # C -> Clear entire word
         elif key in (ord('c'), ord('C')):
             current_word = ""
+            cursor_pos = 0
             print("Word Cleared")
 
         # ENTER -> Complete word
