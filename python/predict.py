@@ -1,4 +1,6 @@
 import cv2
+import pyttsx3
+import threading
 import os
 import joblib
 import numpy as np
@@ -226,9 +228,13 @@ def image_mode():
     # =====================================
 # Camera Mode
 # =====================================
-
+def speak_word(word):
+    engine = pyttsx3.init()
+    engine.say(word)
+    engine.runAndWait()
+    engine.stop()
 def camera_mode():
-
+    
     cap = cv2.VideoCapture(0)
 
     if not cap.isOpened():
@@ -344,6 +350,11 @@ def camera_mode():
         elif key in (10, 13):
             if current_word:
                 print("Completed Word:", current_word)
+                threading.Thread(
+                        target=speak_word,
+                        args=(current_word,),
+                        daemon=True
+                        ).start()
 
         # Q -> Quit
         elif key in (ord('q'), ord('Q')):
