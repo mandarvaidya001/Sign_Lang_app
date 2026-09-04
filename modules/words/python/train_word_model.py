@@ -47,7 +47,158 @@ print("\n=====================================")
 print("Loading Normalized Landmark Dataset")
 print("=====================================\n")
 
-classes = sorted(os.listdir(SEQUENCE_PATH))
+
+# ==========================================================
+# DISCOVER ALL CLASSES
+# ==========================================================
+
+classes = set()
+
+
+for category in sorted(os.listdir(SEQUENCE_PATH)):
+
+    category_path = os.path.join(
+        SEQUENCE_PATH,
+        category
+    )
+
+    if not os.path.isdir(category_path):
+        continue
+
+
+    for cls in sorted(os.listdir(category_path)):
+
+        class_path = os.path.join(
+            category_path,
+            cls
+        )
+
+        if not os.path.isdir(class_path):
+            continue
+
+        classes.add(cls)
+
+
+# Convert set to sorted list
+classes = sorted(classes)
+
+
+print("Classes found:")
+for i, cls in enumerate(classes):
+    print(f"{i:2d} : {cls}")
+
+
+# ==========================================================
+# LOAD LANDMARK FILES
+# ==========================================================
+
+for category in sorted(os.listdir(SEQUENCE_PATH)):
+
+    category_path = os.path.join(
+        SEQUENCE_PATH,
+        category
+    )
+
+    if not os.path.isdir(category_path):
+        continue
+
+
+    for cls in sorted(os.listdir(category_path)):
+
+        class_path = os.path.join(
+            category_path,
+            cls
+        )
+
+        if not os.path.isdir(class_path):
+            continue
+
+
+        for file in sorted(os.listdir(class_path)):
+
+            if not file.endswith(".npy"):
+                continue
+
+
+            file_path = os.path.join(
+                class_path,
+                file
+            )
+
+
+            try:
+
+                data = np.load(file_path)
+
+
+                # ------------------------------------------
+                # Check expected shape
+                # ------------------------------------------
+
+                if data.shape != (30, 225):
+
+                    print(
+                        f"Skipping {file}: "
+                        f"shape = {data.shape}"
+                    )
+
+                    continue
+
+
+                # ------------------------------------------
+                # Check invalid values
+                # ------------------------------------------
+
+                if not np.isfinite(data).all():
+
+                    print(
+                        f"Skipping {file}: "
+                        "contains NaN/Inf"
+                    )
+
+                    continue
+
+
+                X.append(data)
+
+                y.append(cls)
+
+
+            except Exception as e:
+
+                print(
+                    f"Error loading {file}: {e}"
+                )
+
+
+# ==========================================================
+# CONVERT TO NUMPY
+# ==========================================================
+
+X = np.array(
+    X,
+    dtype=np.float32
+)
+
+y = np.array(y)
+
+
+print()
+print("Dataset Loaded Successfully!")
+print(
+    "Dataset Shape:",
+    X.shape
+)
+
+print(
+    "Labels Shape:",
+    y.shape
+)
+
+print(
+    "Number of Classes:",
+    len(classes)
+)
 
 for cls in classes:
 

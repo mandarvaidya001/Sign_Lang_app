@@ -1,6 +1,6 @@
 import os
-import time
 import cv2
+import time
 import numpy as np
 from collections import deque
 
@@ -35,40 +35,43 @@ LABEL_FILE = os.path.join(
 
 FEATURES_PER_FRAME = 225
 
-# Predict every N camera frames
-PREDICTION_INTERVAL = 3
+# IMPORTANT:
+# Training uses 30 frames sampled from a video.
+# Therefore live camera first collects more frames,
+# then samples 30 frames from them.
+LIVE_BUFFER_SIZE = 90
 
-# Number of recent predictions used for smoothing
+PREDICTION_INTERVAL = 5
+
 SMOOTHING_WINDOW = 5
 
-# Minimum confidence before accepting prediction
-LIVE_CONFIDENCE_THRESHOLD = CONFIDENCE_THRESHOLD
+MIN_MARGIN = 5.0
 
-# Time to keep recognized word on screen
-DISPLAY_TIME = 2.0
+CAMERA_INDEX = 0
 
 
 # ==========================================================
 # LOAD MODEL
 # ==========================================================
 
-print("\n========================================")
-print("        HANDTALK AI")
-print("    LIVE WORD RECOGNITION")
-print("========================================")
+print()
+print("=" * 60)
+print("             HANDTALK AI")
+print("       LIVE WORD RECOGNITION")
+print("=" * 60)
+
+print()
+print("Loading model...")
 
 if not os.path.exists(MODEL_FILE):
-
-    print("\nERROR: Model file not found:")
+    print("ERROR: Model not found:")
     print(MODEL_FILE)
-    exit()
-
+    raise SystemExit
 
 if not os.path.exists(LABEL_FILE):
-
-    print("\nERROR: Label file not found:")
+    print("ERROR: Label file not found:")
     print(LABEL_FILE)
-    exit()
+    raise SystemExit
 
 
 model = load_model(
@@ -85,70 +88,130 @@ labels = np.array(
 )
 
 
-print("\nModel Loaded Successfully")
+print()
+print("Model loaded successfully.")
+
 print(
-    "Model:",
-    os.path.basename(MODEL_FILE)
+    "Model outputs :",
+    model.output_shape[-1]
 )
 
 print(
-    "Classes:",
-    labels
-)
-
-print(
-    "Number of Classes:",
+    "Number labels :",
     len(labels)
 )
 
 print(
-    "Sequence Length:",
+    "Sequence      :",
     SEQUENCE_LENGTH
 )
 
 print(
-    "Features / Frame:",
+    "Features/frame:",
     FEATURES_PER_FRAME
 )
 
-print("========================================\n")
+print(
+    "Live buffer   :",
+    LIVE_BUFFER_SIZE
+)
+
+print()
+print("Classes:")
+
+for i, label in enumerate(labels):
+    print(
+        f"{i:2d} -> {label}"
+    )
+
+
+if model.output_shape[-1] != len(labels):
+
+    print()
+    print(
+        "ERROR: Model output count and label count "
+        "do not match."
+    )
+
+    raise SystemExit
 
 
 # ==========================================================
-# PREDICTION FUNCTION
+# SAMPLE LIVE BUFFER
 # ==========================================================
 
-def predict_sequence(sequence):
+def sample_live_buffer(
+    buffer
+):
+
+    if len(buffer) < SEQUENCE_LENGTH:
+
+        return None
+
+
+    # Convert deque/list to numpy array
+
+    data = np.asarray(
+        buffer,
+        dtype=np.float32
+    )
+
+
+    # ------------------------------------------------------
+    # Uniformly select 30 frames from the larger buffer.
+    #
+    # This is the important change.
+    # ------------------------------------------------------
+
+    indices = np.linspace(
+        0,
+        len(data) - 1,
+        SEQUENCE_LENGTH
+    ).astype(int)
+
+
+    sampled = data[
+        indices
+    ]
+
+
+    if sampled.shape != (
+        SEQUENCE_LENGTH,
+        FEATURES_PER_FRAME
+    ):
+
+        return None
+
+
+    return sampled
+
+
+# ==========================================================
+# MODEL PREDICTION
+# ==========================================================
+
+def predict_sequence(
+    sequence
+):
 
     data = np.asarray(
         sequence,
         dtype=np.float32
     )
 
-    expected_shape = (
+
+    if data.shape != (
         SEQUENCE_LENGTH,
         FEATURES_PER_FRAME
-    )
+    ):
 
-    if data.shape != expected_shape:
-
-        print(
-            "Invalid sequence shape:",
-            data.shape
-        )
-
-        return (
-            None,
-            0.0,
-            None
-        )
+        return None
 
 
-    # Add batch dimension
-    #
-    # (30,225)
-    #     ↓
-    # (1,30,225)
+    if not np.isfinite(data).all():
+
+        return None
+
 
     data = np.expand_dims(
         data,
@@ -156,34 +219,30 @@ def predict_sequence(sequence):
     )
 
 
-    probabilities = model.predict(
-        data,
-        verbose=0
-    )[0]
+    try:
+
+        probabilities = model.predict(
+            data,
+            verbose=0
+        )[0]
+
+    except Exception as e:
+
+        print(
+            "\nPrediction error:",
+            e
+        )
+
+        return None
 
 
-    predicted_index = int(
-        np.argmax(probabilities)
+    probabilities = np.asarray(
+        probabilities,
+        dtype=np.float32
     )
 
 
-    confidence = (
-        float(
-            probabilities[predicted_index]
-        ) * 100
-    )
-
-
-    predicted_word = labels[
-        predicted_index
-    ]
-
-
-    return (
-        predicted_word,
-        confidence,
-        probabilities
-    )
+    return probabilities
 
 
 # ==========================================================
@@ -196,7 +255,6 @@ def get_top_predictions(
 ):
 
     if probabilities is None:
-
         return []
 
 
@@ -205,79 +263,32 @@ def get_top_predictions(
     )[::-1][:count]
 
 
-    results = []
+    result = []
+
 
     for index in indices:
 
-        results.append(
+        result.append(
             (
                 labels[index],
                 float(
-                    probabilities[index] * 100
+                    probabilities[index]
+                    * 100
                 )
             )
         )
 
 
-    return results
+    return result
 
 
 # ==========================================================
-# PRINT ALL CLASS PROBABILITIES
+# MEDIAPIPE STATUS
 # ==========================================================
 
-def print_all_probabilities(
-    probabilities
+def get_detection_status(
+    frame
 ):
-
-    if probabilities is None:
-
-        return
-
-
-    print(
-        "\n=============================="
-    )
-
-    print(
-        "LIVE CLASS PROBABILITIES"
-    )
-
-    print(
-        "=============================="
-    )
-
-
-    indices = np.argsort(
-        probabilities
-    )[::-1]
-
-
-    for index in indices:
-
-        print(
-            f"{labels[index]:10s} : "
-            f"{probabilities[index] * 100:6.2f}%"
-        )
-
-
-    print(
-        "=============================="
-    )
-
-
-# ==========================================================
-# LANDMARK STATUS
-# ==========================================================
-
-def get_landmark_status(frame):
-
-    """
-    Used only for displaying whether
-    pose/hands are currently visible.
-
-    It does NOT control sequence collection.
-    """
 
     rgb = cv2.cvtColor(
         frame,
@@ -290,28 +301,28 @@ def get_landmark_status(frame):
     )
 
 
-    pose_detected = (
+    pose = (
         results.pose_landmarks
         is not None
     )
 
 
-    left_hand_detected = (
+    left = (
         results.left_hand_landmarks
         is not None
     )
 
 
-    right_hand_detected = (
+    right = (
         results.right_hand_landmarks
         is not None
     )
 
 
     return (
-        pose_detected,
-        left_hand_detected,
-        right_hand_detected
+        pose,
+        left,
+        right
     )
 
 
@@ -322,175 +333,315 @@ def get_landmark_status(frame):
 def draw_ui(
     frame,
     status,
-    frames,
+    buffer_length,
     pose_detected,
     left_hand_detected,
     right_hand_detected,
     current_word,
     confidence,
     top_predictions,
-    stable_count
+    stable_count,
+    margin
 ):
 
-    # ======================================================
+    # ------------------------------------------------------
     # STATUS
-    # ======================================================
+    # ------------------------------------------------------
+
+    if status == "RECOGNIZED":
+
+        status_color = (
+            0,
+            255,
+            0
+        )
+
+    elif status in (
+        "UNCERTAIN",
+        "LOW CONFIDENCE"
+    ):
+
+        status_color = (
+            0,
+            255,
+            255
+        )
+
+    else:
+
+        status_color = (
+            255,
+            255,
+            255
+        )
+
 
     cv2.putText(
         frame,
         f"Status : {status}",
         (20, 35),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.75,
-        (0, 255, 0),
+        0.70,
+        status_color,
         2
     )
 
 
-    # ======================================================
-    # LANDMARK STATUS
-    # ======================================================
+    # ------------------------------------------------------
+    # POSE
+    # ------------------------------------------------------
 
-    pose_color = (
-        (0, 255, 0)
+    cv2.putText(
+        frame,
+        "Pose       : "
+        + (
+            "YES"
+            if pose_detected
+            else
+            "NO"
+        ),
+        (20, 68),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.55,
+        (
+            0,
+            255,
+            0
+        )
         if pose_detected
-        else (0, 0, 255)
+        else
+        (
+            0,
+            0,
+            255
+        ),
+        2
     )
 
-    left_color = (
-        (0, 255, 0)
+
+    # ------------------------------------------------------
+    # LEFT HAND
+    # ------------------------------------------------------
+
+    cv2.putText(
+        frame,
+        "Left Hand  : "
+        + (
+            "YES"
+            if left_hand_detected
+            else
+            "NO"
+        ),
+        (20, 96),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.55,
+        (
+            0,
+            255,
+            0
+        )
         if left_hand_detected
-        else (0, 0, 255)
+        else
+        (
+            0,
+            0,
+            255
+        ),
+        2
     )
 
-    right_color = (
-        (0, 255, 0)
+
+    # ------------------------------------------------------
+    # RIGHT HAND
+    # ------------------------------------------------------
+
+    cv2.putText(
+        frame,
+        "Right Hand : "
+        + (
+            "YES"
+            if right_hand_detected
+            else
+            "NO"
+        ),
+        (20, 124),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.55,
+        (
+            0,
+            255,
+            0
+        )
         if right_hand_detected
-        else (0, 0, 255)
-    )
-
-
-    cv2.putText(
-        frame,
-        f"Pose       : "
-        f"{'YES' if pose_detected else 'NO'}",
-        (20, 70),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.58,
-        pose_color,
+        else
+        (
+            0,
+            0,
+            255
+        ),
         2
     )
 
 
+    # ------------------------------------------------------
+    # BUFFER
+    # ------------------------------------------------------
+
     cv2.putText(
         frame,
-        f"Left Hand  : "
-        f"{'YES' if left_hand_detected else 'NO'}",
-        (20, 98),
+        f"Buffer : "
+        f"{buffer_length}/{LIVE_BUFFER_SIZE}",
+        (20, 160),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.58,
-        left_color,
+        0.60,
+        (
+            255,
+            255,
+            0
+        ),
         2
     )
 
 
+    # ------------------------------------------------------
+    # MODEL SEQUENCE
+    # ------------------------------------------------------
+
+    if buffer_length >= LIVE_BUFFER_SIZE:
+
+        sequence_text = (
+            "Model sequence : 30/30"
+        )
+
+    else:
+
+        sequence_text = (
+            "Collecting 90 frames..."
+        )
+
+
     cv2.putText(
         frame,
-        f"Right Hand : "
-        f"{'YES' if right_hand_detected else 'NO'}",
-        (20, 126),
+        sequence_text,
+        (20, 190),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.58,
-        right_color,
+        0.52,
+        (
+            255,
+            255,
+            255
+        ),
         2
     )
 
 
-    # ======================================================
-    # FRAME BUFFER
-    # ======================================================
-
-    cv2.putText(
-        frame,
-        f"Frames : "
-        f"{frames}/{SEQUENCE_LENGTH}",
-        (20, 165),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.68,
-        (255, 255, 0),
-        2
-    )
-
-
-    # ======================================================
+    # ------------------------------------------------------
     # WORD
-    # ======================================================
+    # ------------------------------------------------------
 
     cv2.putText(
         frame,
         f"Word : {current_word}",
-        (20, 210),
+        (20, 230),
         cv2.FONT_HERSHEY_SIMPLEX,
-        1.05,
-        (255, 0, 0),
+        1.0,
+        (
+            255,
+            0,
+            0
+        ),
         3
     )
 
 
-    # ======================================================
+    # ------------------------------------------------------
     # CONFIDENCE
-    # ======================================================
+    # ------------------------------------------------------
 
     cv2.putText(
         frame,
         f"Confidence : "
         f"{confidence:.2f}%",
-        (20, 250),
+        (20, 270),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.68,
-        (0, 255, 255),
+        0.62,
+        (
+            0,
+            255,
+            255
+        ),
         2
     )
 
 
-    # ======================================================
+    # ------------------------------------------------------
+    # MARGIN
+    # ------------------------------------------------------
+
+    cv2.putText(
+        frame,
+        f"Top-2 Margin : "
+        f"{margin:.2f}%",
+        (20, 302),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.55,
+        (
+            220,
+            220,
+            220
+        ),
+        2
+    )
+
+
+    # ------------------------------------------------------
     # STABILITY
-    # ======================================================
+    # ------------------------------------------------------
 
     cv2.putText(
         frame,
         f"Stable : "
         f"{stable_count}/{STABLE_FRAMES}",
-        (20, 285),
+        (20, 334),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.62,
-        (255, 255, 255),
+        0.55,
+        (
+            255,
+            255,
+            255
+        ),
         2
     )
 
 
-    # ======================================================
+    # ------------------------------------------------------
     # TOP 3
-    # ======================================================
+    # ------------------------------------------------------
 
     cv2.putText(
         frame,
         "Top Predictions:",
-        (20, 325),
+        (20, 370),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.62,
-        (255, 255, 255),
+        0.58,
+        (
+            255,
+            255,
+            255
+        ),
         2
     )
 
 
-    y = 355
+    y = 400
 
 
     for i, (
         word,
         probability
-    ) in enumerate(top_predictions):
+    ) in enumerate(
+        top_predictions
+    ):
 
         cv2.putText(
             frame,
@@ -499,25 +650,36 @@ def draw_ui(
             f"{probability:.2f}%",
             (20, y),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.58,
-            (200, 200, 255),
+            0.53,
+            (
+                200,
+                200,
+                255
+            ),
             2
         )
 
-        y += 28
+        y += 27
 
 
-    # ======================================================
+    # ------------------------------------------------------
     # HELP
-    # ======================================================
+    # ------------------------------------------------------
 
     cv2.putText(
         frame,
-        "Q = Quit",
-        (20, 455),
+        "Q = Quit     R = Reset",
+        (
+            20,
+            frame.shape[0] - 20
+        ),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.58,
-        (255, 255, 255),
+        0.55,
+        (
+            255,
+            255,
+            255
+        ),
         2
     )
 
@@ -529,22 +691,18 @@ def draw_ui(
 def main():
 
     cap = cv2.VideoCapture(
-        0
+        CAMERA_INDEX
     )
 
 
     if not cap.isOpened():
 
         print(
-            "\nERROR: Could not open camera."
+            "ERROR: Could not open camera."
         )
 
         return
 
-
-    # ======================================================
-    # CAMERA SETTINGS
-    # ======================================================
 
     cap.set(
         cv2.CAP_PROP_FRAME_WIDTH,
@@ -558,48 +716,74 @@ def main():
 
 
     # ======================================================
-    # SEQUENCE BUFFER
+    # LIVE BUFFER
     # ======================================================
 
-    sequence = deque(
-        maxlen=SEQUENCE_LENGTH
+    live_buffer = deque(
+        maxlen=LIVE_BUFFER_SIZE
     )
 
 
     # ======================================================
-    # PREDICTION HISTORY
+    # PROBABILITY SMOOTHING
     # ======================================================
 
-    prediction_history = deque(
+    probability_history = deque(
         maxlen=SMOOTHING_WINDOW
     )
 
 
     # ======================================================
-    # VARIABLES
+    # STATE
     # ======================================================
 
     current_word = "Waiting..."
 
     confidence = 0.0
 
-    stable_count = 0
-
-    last_prediction = ""
+    margin = 0.0
 
     top_predictions = []
 
-    frame_counter = 0
+    status = "WAITING"
 
     last_prediction_frame = 0
 
-    status = "WAITING"
+    frame_counter = 0
 
-    display_until = 0
+    last_candidate = None
+
+    stable_count = 0
+
+
+    print()
+    print(
+        "========================================"
+    )
+    print(
+        "CAMERA STARTED"
+    )
+    print(
+        "========================================"
+    )
+
+    print(
+        "Collecting 90 frames before prediction."
+    )
+
+    print(
+        "Q = Quit"
+    )
+
+    print(
+        "R = Reset"
+    )
+
+    print()
 
 
     # ======================================================
-    # CAMERA LOOP
+    # LOOP
     # ======================================================
 
     while True:
@@ -610,15 +794,15 @@ def main():
         if not ret:
 
             print(
-                "Could not read camera frame."
+                "\nERROR: Could not read camera."
             )
 
             break
 
 
-        # ==================================================
-        # MIRROR CAMERA
-        # ==================================================
+        # --------------------------------------------------
+        # MIRROR
+        # --------------------------------------------------
 
         frame = cv2.flip(
             frame,
@@ -626,48 +810,66 @@ def main():
         )
 
 
-        # ==================================================
-        # EXTRACT NORMALIZED LANDMARKS
-        # ==================================================
+        # --------------------------------------------------
+        # LANDMARK EXTRACTION
+        # --------------------------------------------------
 
-        landmarks = extract_landmarks(
-            frame
-        )
+        try:
 
-
-        # ==================================================
-        # LANDMARK STATUS
-        # ==================================================
-
-        (
-            pose_detected,
-            left_hand_detected,
-            right_hand_detected
-        ) = get_landmark_status(
-            frame
-        )
-
-
-        # ==================================================
-        # ADD FRAME
-        #
-        # We DO NOT require both hands.
-        #
-        # Pose + one hand is valid.
-        # ==================================================
-
-        valid_frame = (
-            pose_detected
-            and (
-                left_hand_detected
-                or right_hand_detected
+            raw_landmarks = (
+                extract_landmarks(
+                    frame
+                )
             )
-        )
+
+        except Exception as e:
+
+            raw_landmarks = None
+
+            print(
+                "\nLandmark extraction error:",
+                e
+            )
 
 
-        if valid_frame:
+        # --------------------------------------------------
+        # VALIDATE
+        # --------------------------------------------------
 
-            sequence.append(
+        landmarks = None
+
+
+        if raw_landmarks is not None:
+
+            try:
+
+                data = np.asarray(
+                    raw_landmarks,
+                    dtype=np.float32
+                )
+
+
+                if data.shape == (
+                    FEATURES_PER_FRAME,
+                ):
+
+                    if np.isfinite(
+                        data
+                    ).all():
+
+                        landmarks = data
+
+            except Exception:
+                landmarks = None
+
+
+        # --------------------------------------------------
+        # ADD VALID FRAME
+        # --------------------------------------------------
+
+        if landmarks is not None:
+
+            live_buffer.append(
                 landmarks
             )
 
@@ -675,11 +877,32 @@ def main():
         frame_counter += 1
 
 
+        # --------------------------------------------------
+        # DETECTION STATUS
+        # --------------------------------------------------
+
+        try:
+
+            (
+                pose_detected,
+                left_hand_detected,
+                right_hand_detected
+            ) = get_detection_status(
+                frame
+            )
+
+        except Exception:
+
+            pose_detected = False
+            left_hand_detected = False
+            right_hand_detected = False
+
+
         # ==================================================
-        # COLLECTING
+        # WAIT UNTIL BUFFER IS FULL
         # ==================================================
 
-        if len(sequence) < SEQUENCE_LENGTH:
+        if len(live_buffer) < LIVE_BUFFER_SIZE:
 
             status = "COLLECTING"
 
@@ -689,207 +912,244 @@ def main():
 
             confidence = 0.0
 
+            margin = 0.0
+
+            top_predictions = []
+
+            stable_count = 0
+
+            last_candidate = None
+
 
         # ==================================================
-        # PREDICTION
+        # BUFFER READY
         # ==================================================
 
         else:
 
             if (
                 frame_counter
-                - last_prediction_frame
-                >= PREDICTION_INTERVAL
+                -
+                last_prediction_frame
+                >=
+                PREDICTION_INTERVAL
             ):
 
-                (
-                    predicted_word,
-                    new_confidence,
-                    probabilities
-                ) = predict_sequence(
-                    list(sequence)
-                )
+                # ==========================================
+                # SAMPLE 30 FRAMES
+                # ==========================================
 
-
-                last_prediction_frame = (
-                    frame_counter
-                )
-
-
-                if predicted_word is not None:
-
-                    confidence = (
-                        new_confidence
+                sampled_sequence = (
+                    sample_live_buffer(
+                        live_buffer
                     )
+                )
 
 
-                    top_predictions = (
-                        get_top_predictions(
-                            probabilities,
-                            3
+                if sampled_sequence is not None:
+
+                    # ======================================
+                    # PREDICT
+                    # ======================================
+
+                    probabilities = (
+                        predict_sequence(
+                            sampled_sequence
                         )
                     )
 
 
-                    # ==================================
-                    # PRINT PROBABILITIES
-                    # ==================================
-
-                    print_all_probabilities(
-                        probabilities
+                    last_prediction_frame = (
+                        frame_counter
                     )
 
 
-                    # ==================================
-                    # CONFIDENCE FILTER
-                    # ==================================
+                    if probabilities is not None:
 
-                    if (
-                        confidence
-                        >= LIVE_CONFIDENCE_THRESHOLD
-                    ):
+                        # ==================================
+                        # STORE PROBABILITIES
+                        # ==================================
 
-                        prediction_history.append(
-                            predicted_word
+                        probability_history.append(
+                            probabilities
                         )
 
 
                         # ==================================
-                        # TEMPORAL MAJORITY VOTE
+                        # AVERAGE TEMPORALLY
                         # ==================================
 
-                        if len(
-                            prediction_history
-                        ) >= 3:
-
-                            counts = {}
-
-                            for word in (
-                                prediction_history
-                            ):
-
-                                counts[word] = (
-                                    counts.get(
-                                        word,
-                                        0
-                                    ) + 1
-                                )
+                        averaged = np.mean(
+                            np.stack(
+                                probability_history
+                            ),
+                            axis=0
+                        )
 
 
-                            stable_word = max(
-                                counts,
-                                key=counts.get
-                            )
+                        # ==================================
+                        # SORT
+                        # ==================================
+
+                        sorted_indices = np.argsort(
+                            averaged
+                        )[::-1]
 
 
-                            stable_votes = (
-                                counts[
-                                    stable_word
+                        best_index = int(
+                            sorted_indices[0]
+                        )
+
+
+                        second_index = int(
+                            sorted_indices[1]
+                        )
+
+
+                        # ==================================
+                        # TOP-1
+                        # ==================================
+
+                        confidence = (
+                            float(
+                                averaged[
+                                    best_index
                                 ]
                             )
+                            * 100
+                        )
 
 
-                            # ==================================
-                            # STABLE PREDICTION
-                            # ==================================
+                        # ==================================
+                        # TOP-2
+                        # ==================================
+
+                        second_confidence = (
+                            float(
+                                averaged[
+                                    second_index
+                                ]
+                            )
+                            * 100
+                        )
+
+
+                        # ==================================
+                        # MARGIN
+                        # ==================================
+
+                        margin = (
+                            confidence
+                            -
+                            second_confidence
+                        )
+
+
+                        # ==================================
+                        # WORD
+                        # ==================================
+
+                        predicted_word = (
+                            labels[
+                                best_index
+                            ]
+                        )
+
+
+                        # ==================================
+                        # TOP 3
+                        # ==================================
+
+                        top_predictions = (
+                            get_top_predictions(
+                                averaged,
+                                3
+                            )
+                        )
+
+
+                        # ==================================
+                        # ACCEPTANCE
+                        # ==================================
+
+                        accepted = (
+                            confidence
+                            >=
+                            CONFIDENCE_THRESHOLD
+                            and
+                            margin
+                            >=
+                            MIN_MARGIN
+                        )
+
+
+                        if accepted:
+
+                            # ==============================
+                            # STABILITY
+                            # ==============================
 
                             if (
-                                stable_word
-                                == last_prediction
+                                predicted_word
+                                ==
+                                last_candidate
                             ):
 
                                 stable_count += 1
 
                             else:
 
-                                last_prediction = (
-                                    stable_word
+                                last_candidate = (
+                                    predicted_word
                                 )
 
                                 stable_count = 1
 
 
+                            # ==============================
+                            # FINAL PREDICTION
+                            # ==============================
+
                             if (
                                 stable_count
-                                >= STABLE_FRAMES
+                                >=
+                                STABLE_FRAMES
                             ):
 
                                 current_word = (
-                                    stable_word
+                                    predicted_word
                                 )
 
                                 status = (
                                     "RECOGNIZED"
                                 )
 
-                                display_until = (
-                                    time.time()
-                                    + DISPLAY_TIME
-                                )
-
-
-                                print(
-                                    "\n################################"
-                                )
-
-                                print(
-                                    " FINAL LIVE PREDICTION"
-                                )
-
-                                print(
-                                    " Word:",
-                                    stable_word
-                                )
-
-                                print(
-                                    f" Confidence:"
-                                    f" {confidence:.2f}%"
-                                )
-
-                                print(
-                                    "################################"
-                                )
-
 
                         else:
 
                             status = (
-                                "ANALYZING"
+                                "UNCERTAIN"
                             )
 
+                            stable_count = 0
 
-                    else:
+                            last_candidate = None
 
-                        status = (
-                            "LOW CONFIDENCE"
+
+                        # ==================================
+                        # TERMINAL
+                        # ==================================
+
+                        print(
+                            f"\r"
+                            f"Prediction: "
+                            f"{predicted_word:<20}"
+                            f"Confidence: "
+                            f"{confidence:6.2f}%"
+                            f" Margin: "
+                            f"{margin:6.2f}%",
+                            end=""
                         )
-
-                        stable_count = 0
-
-                        last_prediction = ""
-
-
-                        # Don't allow an old
-                        # prediction to dominate.
-
-                        prediction_history.clear()
-
-
-        # ==================================================
-        # RESET DISPLAY
-        # ==================================================
-
-        if (
-            display_until > 0
-            and time.time()
-            > display_until
-        ):
-
-            current_word = (
-                "Recognizing..."
-            )
-
-            display_until = 0
 
 
         # ==================================================
@@ -897,38 +1157,38 @@ def main():
         # ==================================================
 
         draw_ui(
-
             frame,
-
             status,
-
-            len(sequence),
-
+            len(live_buffer),
             pose_detected,
-
             left_hand_detected,
-
             right_hand_detected,
-
             current_word,
-
             confidence,
-
             top_predictions,
-
-            stable_count
-
+            stable_count,
+            margin
         )
 
 
         # ==================================================
-        # DISPLAY CAMERA
+        # DISPLAY
         # ==================================================
 
         cv2.imshow(
-            "HandTalk AI - "
-            "Live Word Recognition",
+            "HandTalk AI - Live Word Recognition",
             frame
+        )
+
+
+        # ==================================================
+        # KEY
+        # ==================================================
+
+        key = (
+            cv2.waitKey(1)
+            &
+            0xFF
         )
 
 
@@ -936,15 +1196,44 @@ def main():
         # QUIT
         # ==================================================
 
-        key = (
-            cv2.waitKey(1)
-            & 0xFF
-        )
-
-
         if key == ord("q"):
 
             break
+
+
+        # ==================================================
+        # RESET
+        # ==================================================
+
+        if key == ord("r"):
+
+            live_buffer.clear()
+
+            probability_history.clear()
+
+            current_word = (
+                "Waiting..."
+            )
+
+            confidence = 0.0
+
+            margin = 0.0
+
+            top_predictions = []
+
+            status = "RESET"
+
+            last_candidate = None
+
+            stable_count = 0
+
+            last_prediction_frame = 0
+
+            frame_counter = 0
+
+            print(
+                "\n\nPrediction reset."
+            )
 
 
     # ======================================================
@@ -954,6 +1243,12 @@ def main():
     cap.release()
 
     cv2.destroyAllWindows()
+
+    print()
+    print()
+    print(
+        "Camera stopped."
+    )
 
 
 # ==========================================================

@@ -34,9 +34,8 @@ DATASET_PATH = os.path.join(
 
 SEQUENCE_PATH = os.path.join(
     PROJECT_ROOT,
-    "modules",
-    "words",
-    "sequences"
+    "Dataset",
+    "Words_Landmarks"
 )
 
 MODEL_PATH = os.path.join(

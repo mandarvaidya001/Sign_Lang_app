@@ -3,18 +3,15 @@ import cv2
 import numpy as np
 from tensorflow.keras.models import load_model
 
-from config import (
-    DATASET_PATH,
-    MODEL_PATH,
-    SEQUENCE_LENGTH
-)
-
 from mediapipe_utils import extract_landmarks
 
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
+
+SEQUENCE_LENGTH = 30
+EXPECTED_FEATURES = 225
 
 MODEL_NAME = "word_model_normalized_attention.keras"
 LABEL_NAME = "word_labels.npy"
@@ -26,12 +23,80 @@ VIDEO_EXTENSIONS = (
     ".mkv"
 )
 
-EXPECTED_FEATURES = 225
+# ------------------------------------------------------------
+# Greeting classes
+# ------------------------------------------------------------
+
+GREETING_CLASSES = [
+    "Alright",
+    "Good afternoon",
+    "Good evening",
+    "Good Morning",
+    "Good night",
+    "Hello",
+    "How are you",
+    "Pleased",
+    "Thank you"
+]
 
 
 # ============================================================
-# PATHS
+# PROJECT PATH
 # ============================================================
+
+# Current file:
+#
+# Sign_Lang_app/
+#     modules/
+#         words/
+#             python/
+#                 test_greetings.py
+#
+# Therefore go up:
+#
+# python -> words -> modules -> Sign_Lang_app
+
+CURRENT_FILE = os.path.abspath(__file__)
+
+PYTHON_FOLDER = os.path.dirname(
+    CURRENT_FILE
+)
+
+WORDS_MODULE_FOLDER = os.path.dirname(
+    PYTHON_FOLDER
+)
+
+MODULES_FOLDER = os.path.dirname(
+    WORDS_MODULE_FOLDER
+)
+
+PROJECT_ROOT = os.path.dirname(
+    MODULES_FOLDER
+)
+
+
+# ============================================================
+# DATASET PATH
+# ============================================================
+
+GREETING_DATASET_PATH = os.path.join(
+    PROJECT_ROOT,
+    "Dataset",
+    "Words",
+    "Greetings"
+)
+
+
+# ============================================================
+# MODEL PATH
+# ============================================================
+
+MODEL_PATH = os.path.join(
+    PROJECT_ROOT,
+    "modules",
+    "words",
+    "models"
+)
 
 MODEL_FILE = os.path.join(
     MODEL_PATH,
@@ -45,17 +110,21 @@ LABEL_FILE = os.path.join(
 
 
 # ============================================================
-# HEADER
+# DISPLAY PATHS
 # ============================================================
 
 print()
 print("=" * 60)
-print("          WORD MODEL VIDEO TESTING")
+print("              GREETING DATASET TEST")
 print("=" * 60)
 
 print()
-print("Dataset Path:")
-print(DATASET_PATH)
+print("Project Root:")
+print(PROJECT_ROOT)
+
+print()
+print("Greeting Dataset:")
+print(GREETING_DATASET_PATH)
 
 print()
 print("Model:")
@@ -67,22 +136,56 @@ print(LABEL_FILE)
 
 
 # ============================================================
-# CHECK FILES
+# CHECK DATASET
 # ============================================================
 
-if not os.path.exists(MODEL_FILE):
+if not os.path.exists(
+    GREETING_DATASET_PATH
+):
 
     print()
-    print("ERROR: Model file not found!")
-    print(MODEL_FILE)
+    print("ERROR: Greeting dataset folder not found!")
+    print()
+    print(
+        GREETING_DATASET_PATH
+    )
+
     raise SystemExit
 
 
-if not os.path.exists(LABEL_FILE):
+# ============================================================
+# CHECK MODEL
+# ============================================================
+
+if not os.path.exists(
+    MODEL_FILE
+):
+
+    print()
+    print("ERROR: Model file not found!")
+    print()
+    print(
+        MODEL_FILE
+    )
+
+    raise SystemExit
+
+
+# ============================================================
+# CHECK LABEL FILE
+# ============================================================
+
+if not os.path.exists(
+    LABEL_FILE
+):
 
     print()
     print("ERROR: Label file not found!")
-    print(LABEL_FILE)
+    print()
+    print(
+        LABEL_FILE
+    )
+
     raise SystemExit
 
 
@@ -113,12 +216,8 @@ labels = np.asarray(
 
 
 # ============================================================
-# MODEL / LABEL CHECK
+# MODEL INFORMATION
 # ============================================================
-
-model_classes = model.output_shape[-1]
-label_classes = len(labels)
-
 
 print()
 print("=" * 60)
@@ -127,101 +226,77 @@ print("=" * 60)
 
 print(
     "Model output classes :",
-    model_classes
+    model.output_shape[-1]
 )
 
 print(
     "Label file classes   :",
-    label_classes
+    len(labels)
 )
 
-print(
-    "Classes              :",
+print()
+print("All model classes:")
+
+for i, label in enumerate(
     labels
-)
-
-
-if model_classes != label_classes:
-
-    print()
-    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-    print("MODEL / LABEL MISMATCH")
-    print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+):
 
     print(
-        f"Model has {model_classes} outputs "
-        f"but label file has {label_classes} labels."
+        f"{i:2d} -> {label}"
+    )
+
+
+# ============================================================
+# MODEL / LABEL VALIDATION
+# ============================================================
+
+if model.output_shape[-1] != len(labels):
+
+    print()
+    print("=" * 60)
+    print("ERROR: MODEL / LABEL MISMATCH")
+    print("=" * 60)
+
+    print(
+        "Model outputs :",
+        model.output_shape[-1]
+    )
+
+    print(
+        "Labels        :",
+        len(labels)
     )
 
     print()
-    print("Do NOT continue testing.")
+    print(
+        "Do not continue testing."
+    )
 
     raise SystemExit
 
 
 print()
-print("Model and label mapping are compatible.")
+print(
+    "Model and label mapping are compatible."
+)
 
 
 # ============================================================
-# FIND CLASS FOLDER
-# ============================================================
-
-def find_class_folder(dataset_path, class_name):
-
-    # Animals
-    animal_path = os.path.join(
-        dataset_path,
-        "Animals",
-        class_name
-    )
-
-    if os.path.isdir(animal_path):
-        return animal_path
-
-
-    # Greetings
-    greeting_path = os.path.join(
-        dataset_path,
-        "Greetings",
-        class_name
-    )
-
-    if os.path.isdir(greeting_path):
-        return greeting_path
-
-
-    return None
-
-    for root, dirs, files in os.walk(
-        dataset_path
-    ):
-
-        for directory in dirs:
-
-            if directory == class_name:
-
-                return os.path.join(
-                    root,
-                    directory
-                )
-
-    return None
-
-
-# ============================================================
-# GET VIDEOS
+# GET VIDEO FILES
 # ============================================================
 
 def get_video_files(
     folder
 ):
 
+    if not os.path.isdir(
+        folder
+    ):
+
+        return []
+
+
     videos = []
-
-    if folder is None:
-        return videos
-
 
     for filename in sorted(
         os.listdir(folder)
@@ -232,11 +307,9 @@ def get_video_files(
         ):
 
             videos.append(
-                os.path.join(
-                    folder,
-                    filename
-                )
+                filename
             )
+
 
     return videos
 
@@ -270,6 +343,7 @@ def extract_video_sequence(
 
 
             if not ret:
+
                 break
 
 
@@ -294,7 +368,7 @@ def extract_video_sequence(
 
 
             # ------------------------------------------------
-            # Check feature count
+            # Check frame shape
             # ------------------------------------------------
 
             if landmarks.shape != (
@@ -315,7 +389,7 @@ def extract_video_sequence(
 
 
     # --------------------------------------------------------
-    # No usable frames
+    # No valid frames
     # --------------------------------------------------------
 
     if len(frames) == 0:
@@ -330,19 +404,23 @@ def extract_video_sequence(
 
 
     # ========================================================
-    # CONVERT TO EXACT SEQUENCE LENGTH
+    # EXACTLY 30 FRAMES
     # ========================================================
 
     if len(frames) < SEQUENCE_LENGTH:
 
         last_frame = frames[-1]
 
+
         while len(frames) < SEQUENCE_LENGTH:
 
             frames = np.vstack(
                 [
                     frames,
-                    last_frame[np.newaxis, :]
+                    last_frame[
+                        np.newaxis,
+                        :
+                    ]
                 ]
             )
 
@@ -355,6 +433,7 @@ def extract_video_sequence(
             SEQUENCE_LENGTH,
             dtype=int
         )
+
 
         frames = frames[
             indices
@@ -377,7 +456,7 @@ def extract_video_sequence(
 
 
     # ========================================================
-    # CHECK FOR NaN / INF
+    # CHECK NUMERICAL VALUES
     # ========================================================
 
     if not np.isfinite(
@@ -391,7 +470,7 @@ def extract_video_sequence(
 
 
 # ============================================================
-# PREDICT VIDEO
+# PREDICT ONE VIDEO
 # ============================================================
 
 def predict_video(
@@ -419,7 +498,7 @@ def predict_video(
 
 
     # --------------------------------------------------------
-    # Prediction
+    # Model prediction
     # --------------------------------------------------------
 
     prediction = model.predict(
@@ -428,33 +507,43 @@ def predict_video(
     )
 
 
+    probabilities = prediction[0]
+
+
     # --------------------------------------------------------
-    # Get highest probability
+    # Highest probability
     # --------------------------------------------------------
 
-    index = int(
+    predicted_index = int(
         np.argmax(
-            prediction[0]
+            probabilities
         )
     )
 
 
-    predicted_word = labels[index]
+    predicted_label = labels[
+        predicted_index
+    ]
 
 
     confidence = (
         float(
-            prediction[0][index]
+            probabilities[
+                predicted_index
+            ]
         )
         * 100
     )
 
 
-    return predicted_word, confidence
+    return (
+        predicted_label,
+        confidence
+    )
 
 
 # ============================================================
-# TEST ALL CLASSES
+# TEST GREETING CLASSES
 # ============================================================
 
 total = 0
@@ -462,14 +551,18 @@ correct = 0
 failed = 0
 
 
-class_results = {}
+print()
+print()
+print("=" * 60)
+print("              TESTING GREETINGS")
+print("=" * 60)
 
 
-for class_name in labels:
+# ============================================================
+# EACH GREETING CLASS
+# ============================================================
 
-    class_name = str(
-        class_name
-    )
+for class_name in GREETING_CLASSES:
 
 
     print()
@@ -482,40 +575,43 @@ for class_name in labels:
 
 
     # --------------------------------------------------------
-    # Find class folder
+    # Correct greeting path
     # --------------------------------------------------------
 
-    folder = find_class_folder(
-        DATASET_PATH,
+    class_folder = os.path.join(
+        GREETING_DATASET_PATH,
         class_name
     )
 
 
-    if folder is None:
+    print(
+        "Folder:",
+        class_folder
+    )
+
+
+    # --------------------------------------------------------
+    # Check folder
+    # --------------------------------------------------------
+
+    if not os.path.isdir(
+        class_folder
+    ):
 
         print()
         print(
-            "WARNING: Folder not found for:",
-            class_name
+            "ERROR: Folder not found!"
         )
-
-        class_results[class_name] = {
-            "correct": 0,
-            "total": 0,
-            "failed": 0
-        }
 
         continue
 
 
-    print(
-        "Folder:",
-        folder
-    )
-
+    # --------------------------------------------------------
+    # Get videos
+    # --------------------------------------------------------
 
     videos = get_video_files(
-        folder
+        class_folder
     )
 
 
@@ -531,13 +627,15 @@ for class_name in labels:
 
 
     # ========================================================
-    # TEST EACH VIDEO
+    # PROCESS VIDEOS
     # ========================================================
 
-    for video_path in videos:
+    for filename in videos:
 
-        filename = os.path.basename(
-            video_path
+
+        video_path = os.path.join(
+            class_folder,
+            filename
         )
 
 
@@ -547,7 +645,7 @@ for class_name in labels:
 
 
         # ----------------------------------------------------
-        # Prediction failed
+        # Extraction failure
         # ----------------------------------------------------
 
         if predicted is None:
@@ -562,30 +660,34 @@ for class_name in labels:
             continue
 
 
-        class_total += 1
+        # ----------------------------------------------------
+        # Count
+        # ----------------------------------------------------
+
         total += 1
+        class_total += 1
 
 
         # ----------------------------------------------------
-        # Correct / incorrect
+        # Correct prediction
         # ----------------------------------------------------
 
-        is_correct = (
-            predicted == class_name
-        )
-
-
-        if is_correct:
+        if predicted == class_name:
 
             correct += 1
             class_correct += 1
 
             symbol = "✓"
 
+
         else:
 
             symbol = "✗"
 
+
+        # ----------------------------------------------------
+        # Display
+        # ----------------------------------------------------
 
         print(
             f"{filename:22} -> "
@@ -606,16 +708,10 @@ for class_name in labels:
             class_total
         ) * 100
 
+
     else:
 
         class_accuracy = 0.0
-
-
-    class_results[class_name] = {
-        "correct": class_correct,
-        "total": class_total,
-        "failed": class_failed
-    }
 
 
     print()
@@ -626,13 +722,13 @@ for class_name in labels:
 
 
 # ============================================================
-# OVERALL ACCURACY
+# OVERALL GREETING ACCURACY
 # ============================================================
 
 print()
 print()
 print("=" * 60)
-print("                OVERALL ACCURACY")
+print("          GREETING OVERALL ACCURACY")
 print("=" * 60)
 
 
@@ -661,6 +757,7 @@ if total > 0:
         f"Accuracy: {overall_accuracy:.2f}%"
     )
 
+
 else:
 
     print(
@@ -669,59 +766,10 @@ else:
 
 
 # ============================================================
-# CLASS SUMMARY
+# END
 # ============================================================
 
 print()
-print()
 print("=" * 60)
-print("                  CLASS SUMMARY")
-print("=" * 60)
-
-
-for class_name in labels:
-
-    class_name = str(
-        class_name
-    )
-
-
-    result = class_results.get(
-        class_name,
-        {
-            "correct": 0,
-            "total": 0,
-            "failed": 0
-        }
-    )
-
-
-    c = result["correct"]
-    t = result["total"]
-    f = result["failed"]
-
-
-    if t > 0:
-
-        accuracy = (
-            c /
-            t
-        ) * 100
-
-    else:
-
-        accuracy = 0.0
-
-
-    print(
-        f"{class_name:18} "
-        f"{c:3}/{t:<3} "
-        f"{accuracy:6.2f}% "
-        f"(Failed: {f})"
-    )
-
-
-print()
-print("=" * 60)
-print("                    TEST COMPLETE")
+print("             GREETING TEST COMPLETE")
 print("=" * 60)
